@@ -10,6 +10,7 @@ import fitz  # PyMuPDF
 from transformers import pipeline
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
 
 # Load Hugging Face summarization model
 summarizer = pipeline("summarization", model="t5-small")
@@ -22,9 +23,9 @@ if not os.path.exists(PDF_DIR):
     os.makedirs(PDF_DIR)
 
 # Executor to run background tasks
-executor = ThreadPoolExecutor(max_workers=3)
+executor = ThreadPoolExecutor(max_workers=10)
 tasks = {}  # Dictionary to store task results
-
+processing = {}
 
 def get_pdf_filename(url):
     """Generate a unique filename based on the URL"""
@@ -60,7 +61,7 @@ def extract_chapters_from_pdf(pdf_path):
     
     # Open the PDF using pdfplumber to extract text for summaries
     with pdfplumber.open(pdf_path) as pdf:
-        for index, toc_entry in enumerate(toc):
+        for index, toc_entry in tqdm(enumerate(toc), total=len(toc)):
             level, title, start_page = toc_entry
             start_page -= 1  # Adjust start_page to 0-indexed
             
@@ -71,7 +72,6 @@ def extract_chapters_from_pdf(pdf_path):
                 chapters = chapters[:previous_index + 1]
                 # Update the end_page of the previous chapter
                 chapters[previous_index]['end_page'] = start_page - 1
-            
             # Otherwise, mark this chapter title as processed
             else:
                 chapter_title_positions[title] = len(chapters)
@@ -84,7 +84,7 @@ def extract_chapters_from_pdf(pdf_path):
             
             # Extract text for this chapter
             chapter_text = ""
-            for page_num in range(start_page, next_start_page + 1):
+            for page_num in range(start_page, min(20,next_start_page + 1)):
                 page = pdf.pages[page_num]
                 chapter_text += page.extract_text()
             
@@ -98,31 +98,17 @@ def extract_chapters_from_pdf(pdf_path):
                 'end_page': next_start_page
             }
             chapters.append(chapter)
-    
     return chapters
 
 
 async def run_extraction_task(task_id, pdf_url):
     """Run the PDF extraction and summarization task in the background."""
+    processing[task_id] = True
     pdf_path = download_pdf(pdf_url)
     loop = asyncio.get_event_loop()
-    chapters = await loop.run_in_executor(executor, extract_chapters_from_pdf, pdf_path)
+    chapters = extract_chapters_from_pdf(pdf_path)
     tasks[task_id] = chapters  # Store the result of the task
-
-
-@app.route("/start_task", methods=["POST"])
-async def start_task():
-    """Start the asynchronous PDF extraction task."""
-    data = request.json
-    pdf_url = data.get("pdf_url")
-    
-    # Generate a unique task ID
-    task_id = hashlib.md5(pdf_url.encode('utf-8')).hexdigest()
-    
-    # Start the background task
-    asyncio.create_task(run_extraction_task(task_id, pdf_url))
-    
-    return jsonify({"task_id": task_id, "status": "Task started"}), 202
+    del processing[task_id]
 
 
 @app.route("/task_status/<task_id>", methods=["GET"])
@@ -130,9 +116,10 @@ def task_status(task_id):
     """Check the status of the background task."""
     if task_id in tasks:
         return jsonify({"task_id": task_id, "status": "Completed", "data": tasks[task_id]})
-    else:
+    elif task_id in processing:
         return jsonify({"task_id": task_id, "status": "Processing"}), 202
-
+    else:
+        return jsonify({"task_id": task_id, "status": "Unknown Task"}), 202
 
 @app.route("/rss", methods=["GET"])
 async def generate_rss_feed():
@@ -145,14 +132,13 @@ async def generate_rss_feed():
     task_id = hashlib.md5(pdf_url.encode('utf-8')).hexdigest()
 
     # Start the background task if not already started
-    if task_id not in tasks:
+    if task_id not in processing and task_id not in tasks:
         asyncio.create_task(run_extraction_task(task_id, pdf_url))
         return jsonify({"task_id": task_id, "status": "Processing started"}), 202
 
-    # Wait for the task to complete
+
     while task_id not in tasks:
         await asyncio.sleep(1)
-    
     # Retrieve the chapters
     chapters = tasks[task_id]
 
