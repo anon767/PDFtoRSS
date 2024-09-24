@@ -94,51 +94,6 @@ def extract_chapters_from_pdf(pdf_path):
     
     return chapters
 
-def is_chapter_title(title, font_info=None):
-    """
-    Determine if a line of text is a chapter title using multiple heuristics.
-    
-    Parameters:
-    - title: The line of text to analyze.
-    - font_info: (Optional) Font information such as font size, if available.
-    
-    Returns:
-    - bool: True if the line is determined to be a chapter title.
-    """
-    # Strip surrounding whitespace
-    title = title.strip()
-    
-    # Basic checks for common chapter-related keywords or patterns
-    chapter_patterns = [
-        r"^chapter \d+",  # "Chapter 1", "Chapter 10"
-        r"^section \d+",  # "Section 1", "Section 1.1"
-        r"^part \d+",     # "Part 1", "Part II"
-        r"^\d+(\.\d+)*",  # "1", "1.1", "1.1.1"
-    ]
-    
-    # Check for matching patterns
-    for pattern in chapter_patterns:
-        if re.match(pattern, title, re.IGNORECASE):
-            return True
-
-    # If the title is in all uppercase, it could be a chapter title
-    if title.isupper():
-        return True
-
-    # If the title has fewer than a certain number of words (e.g., 10), it may be a title
-    if len(title.split()) <= 10:
-        # Further refine by looking for special characters or patterns indicating a chapter
-        if re.match(r'^\d+[\.]*\s*[A-Za-z]+', title):
-            return True
-
-    # Heuristic based on font size (if available)
-    if font_info and 'size' in font_info:
-        # Assume a larger font size indicates a title (you might need to fine-tune this threshold)
-        if font_info['size'] > 12:  # Example threshold for larger titles
-            return True
-
-    # Add any additional specific checks you might need for the document structure
-    return False
 
 @app.route("/rss", methods=["GET"])
 def generate_rss_feed():
