@@ -14,7 +14,10 @@ python3 main.py
 
 ## Usage
 
-To get the RSS feed:
+Create a feed from a book async
 http://127.0.0.1:5000/rss?url=urltopdf.pdf
+
+Check task status
+http://127.0.0.1:5000/task_status/<task_id>
 
 
