@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 import hashlib
 import fitz  # PyMuPDF
 from transformers import pipeline
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 # Load Hugging Face summarization model
 summarizer = pipeline("summarization", model="t5-small")
@@ -19,11 +21,17 @@ PDF_DIR = "static/pdfs"
 if not os.path.exists(PDF_DIR):
     os.makedirs(PDF_DIR)
 
+# Executor to run background tasks
+executor = ThreadPoolExecutor(max_workers=3)
+tasks = {}  # Dictionary to store task results
+
+
 def get_pdf_filename(url):
     """Generate a unique filename based on the URL"""
     parsed_url = urlparse(url)
     filename = hashlib.md5(parsed_url.path.encode('utf-8')).hexdigest() + ".pdf"
     return os.path.join(PDF_DIR, filename)
+
 
 def download_pdf(url):
     """Download the PDF from the URL if not already downloaded"""
@@ -39,7 +47,7 @@ def download_pdf(url):
 
 
 def extract_chapters_from_pdf(pdf_path):
-    """Extract chapters from a PDF file using get_toc() and identify both start and end pages, 
+    """Extract chapters from a PDF file using get_toc() and identify both start and end pages,
     backtracking when a chapter is repeated, and generating descriptions with a summarization model."""
     
     chapters = []
@@ -82,12 +90,11 @@ def extract_chapters_from_pdf(pdf_path):
             
             # Summarize the chapter content
             better_description = summarizer(chapter_text[:800], max_length=150, min_length=30, do_sample=False)[0]['summary_text']
-            #better_description = chapter_text
             # Add chapter details to the list
             chapter = {
                 'title': title,
                 'description': better_description,
-                'start_page': start_page-1,
+                'start_page': start_page,
                 'end_page': next_start_page
             }
             chapters.append(chapter)
@@ -95,15 +102,59 @@ def extract_chapters_from_pdf(pdf_path):
     return chapters
 
 
+async def run_extraction_task(task_id, pdf_url):
+    """Run the PDF extraction and summarization task in the background."""
+    pdf_path = download_pdf(pdf_url)
+    loop = asyncio.get_event_loop()
+    chapters = await loop.run_in_executor(executor, extract_chapters_from_pdf, pdf_path)
+    tasks[task_id] = chapters  # Store the result of the task
+
+
+@app.route("/start_task", methods=["POST"])
+async def start_task():
+    """Start the asynchronous PDF extraction task."""
+    data = request.json
+    pdf_url = data.get("pdf_url")
+    
+    # Generate a unique task ID
+    task_id = hashlib.md5(pdf_url.encode('utf-8')).hexdigest()
+    
+    # Start the background task
+    asyncio.create_task(run_extraction_task(task_id, pdf_url))
+    
+    return jsonify({"task_id": task_id, "status": "Task started"}), 202
+
+
+@app.route("/task_status/<task_id>", methods=["GET"])
+def task_status(task_id):
+    """Check the status of the background task."""
+    if task_id in tasks:
+        return jsonify({"task_id": task_id, "status": "Completed", "data": tasks[task_id]})
+    else:
+        return jsonify({"task_id": task_id, "status": "Processing"}), 202
+
+
 @app.route("/rss", methods=["GET"])
-def generate_rss_feed():
-    """Generate an RSS feed from the chapters in the PDF"""
+async def generate_rss_feed():
+    """Generate an RSS feed from the chapters in the PDF."""
     pdf_url = request.args.get('url')
     if not pdf_url:
         return jsonify({"error": "URL parameter is missing"}), 400
 
-    pdf_path = download_pdf(pdf_url)
-    chapters = extract_chapters_from_pdf(pdf_path)
+    # Generate a task ID
+    task_id = hashlib.md5(pdf_url.encode('utf-8')).hexdigest()
+
+    # Start the background task if not already started
+    if task_id not in tasks:
+        asyncio.create_task(run_extraction_task(task_id, pdf_url))
+        return jsonify({"task_id": task_id, "status": "Processing started"}), 202
+
+    # Wait for the task to complete
+    while task_id not in tasks:
+        await asyncio.sleep(1)
+    
+    # Retrieve the chapters
+    chapters = tasks[task_id]
 
     # Create RSS feed
     fg = FeedGenerator()
@@ -114,18 +165,19 @@ def generate_rss_feed():
     for chapter in chapters:
         fe = fg.add_entry()
         fe.title(chapter['title'])
-        fe.link(href=f"{request.host_url}pdf-chapter?file={os.path.basename(pdf_path)}&start_page={chapter['start_page']}&end_page={chapter['end_page']}")
+        fe.link(href=f"{request.host_url}pdf-chapter?file={get_pdf_filename(pdf_url)}&start_page={chapter['start_page']}&end_page={chapter['end_page']}")
         fe.description(chapter['description'])
 
     rss_feed = fg.rss_str(pretty=True)
     return rss_feed, {'Content-Type': 'application/rss+xml'}
 
+
 @app.route("/pdf-chapter", methods=["GET"])
 def view_pdf_chapter():
-    """Serve a specific chapter as a new PDF (this would extract only the page/chapter requested)"""
+    """Serve a specific chapter as a new PDF (this would extract only the page/chapter requested)."""
     pdf_file = request.args.get('file')
     start_page = int(request.args.get('start_page'))
-    end_page = int(request.args.get('end_page'))    
+    end_page = int(request.args.get('end_page'))
     pdf_path = os.path.join(PDF_DIR, pdf_file)
 
     if not os.path.exists(pdf_path):
@@ -140,7 +192,7 @@ def view_pdf_chapter():
 
         # Create a new PDF with just the selected page
         new_pdf = fitz.open()  # Create a new empty PDF
-        new_pdf.insert_pdf(pdf_document, from_page=start_page-1, to_page=end_page)  # Add the range of pages
+        new_pdf.insert_pdf(pdf_document, from_page=start_page, to_page=end_page)  # Add the range of pages
         new_pdf.save(output_pdf_path)
         new_pdf.close()
 
