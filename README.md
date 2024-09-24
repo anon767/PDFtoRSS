@@ -1,4 +1,4 @@
-# Server any PDF Book as RSS
+# Serve any PDF Book as RSS
 
 I feel like sometimes I need to have my eBooks in byte-sized chunks.
 This basically generates a RSS feed containing each chapter with a LLM generated summary as entry. 
