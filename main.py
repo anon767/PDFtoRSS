@@ -88,7 +88,7 @@ def extract_chapters_from_pdf(pdf_path):
                 chapter_text += page.extract_text()
 
             # Summarize the chapter content
-            better_description = summarizer(chapter_text[:800], max_length=150, min_length=30, do_sample=False)[0]['summary_text']
+            better_description = summarizer(chapter_text[:3000], max_length=150, min_length=30, do_sample=False)[0]['summary_text']
             # Add chapter details to the list
             chapter = {
                 'title': title,
