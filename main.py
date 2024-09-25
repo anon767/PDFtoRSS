@@ -83,7 +83,7 @@ def extract_chapters_from_pdf(pdf_path):
 
             # Extract text for this chapter
             chapter_text = ""
-            for page_num in range(start_page, min(20,next_start_page + 1)):
+            for page_num in range(start_page, min(100,next_start_page + 1)):
                 page = pdf.pages[page_num]
                 chapter_text += page.extract_text()
 
