@@ -4,6 +4,8 @@ I feel like sometimes I need to have my eBooks in byte-sized chunks.
 This basically generates a RSS feed containing each chapter with a LLM generated summary as entry. 
 It will also contain a link to a particular chapter that only shows these specific pages.
 
+Im using t5-small on the first 100 pages of a chapter to summarize it. It is not very accurate, so if you are willing to trade-off speed/computations for better summatization replace it with a bigger model (e.g. https://pypi.org/project/bert-extractive-summarizer/).
+
 ## Install
 
 ```
