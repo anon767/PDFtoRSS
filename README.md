@@ -20,4 +20,6 @@ http://127.0.0.1:5000/rss?url=urltopdf.pdf
 Check task status
 http://127.0.0.1:5000/task_status/<task_id>
 
+Show a specific chapter
+http://127.0.0.1:5000/pdf-chapter?file=20f529b89eba84b193cacb7591c07785.pdf&start_page=597&end_page=597
 
